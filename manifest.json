@@ -1,14 +1,21 @@
 {
   "manifest_version": 3,
-  "name": "Activity Timer",
+  "name": "Time Tracker - BG",
   "version": "1.0",
-  "description": "Track time spent on each URL and domain.",
-  "permissions": ["tabs", "storage", "scripting"],
+  "description": "Track time per domain y export Banco Guayaquil format",
+  "permissions": [
+    "tabs",
+    "downloads",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "popup_tabs.html",
     "default_icon": {
       "16": "icon.png",
       "48": "icon.png",
@@ -19,5 +26,9 @@
     "16": "icon.png",
     "48": "icon.png",
     "128": "icon.png"
-  }
+  },
+  "web_accessible_resources": [{
+    "resources": ["tabs_style.css","popup_tabs.js","chart.min.js"],
+    "matches": ["<all_urls>"]
+  }]
 }

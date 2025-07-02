@@ -1,0 +1,52 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #202124;
+  color: #e8eaed;
+  width: 300px;
+}
+
+.tab-header {
+  display: flex;
+  background: #2e2e2e;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 10px;
+  background: transparent;
+  border: none;
+  color: #e8eaed;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+.tab-btn.active {
+  background: #1a73e8;
+}
+
+.tab-content {
+  padding: 10px;
+}
+
+.hidden {
+  display: none;
+}
+
+.scroll-container {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.export-button {
+  width: 100%;
+  padding: 12px;
+  background: #1a73e8;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.export-button:hover {
+  background: #185abc;
+}
