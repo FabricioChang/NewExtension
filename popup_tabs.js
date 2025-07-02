@@ -41,8 +41,19 @@ document.addEventListener("DOMContentLoaded", () => {
 function renderDonut(labels, data) {
   new Chart(document.getElementById("donutChart"), {
     type: "doughnut",
-    data: { labels, datasets: [{ data }] },
-    options: { responsive: true, maintainAspectRatio: false }
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: ["#00f9ff", "#ff00e6", "#fbff00", "#8c00ff", "#00ff8c"],
+        borderWidth: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: "#e6e6e6" } } }
+    }
   });
 }
 
@@ -52,14 +63,18 @@ function renderBar(labels, sessions, durations) {
     data: {
       labels,
       datasets: [
-        { label: "Sesiones", data: sessions },
-        { label: "Tiempo (s)", data: durations }
+        { label: "Sesiones", data: sessions, backgroundColor: "#00f9ff" },
+        { label: "Tiempo (s)", data: durations, backgroundColor: "#ff00e6" }
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      scales: { y: { beginAtZero: true } }
+      scales: {
+        x: { ticks: { color: "#e6e6e6" }, grid: { color: "#ffffff22" } },
+        y: { beginAtZero: true, ticks: { color: "#e6e6e6" }, grid: { color: "#ffffff22" } }
+      },
+      plugins: { legend: { labels: { color: "#e6e6e6" } } }
     }
   });
 }

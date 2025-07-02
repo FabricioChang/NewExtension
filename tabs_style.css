@@ -1,52 +1,160 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400..900&display=swap');
+
+/* ===== CYBERPUNK NEON THEME ===== */
+:root {
+  /* Colores principales */
+  --c-bg-1: #0d0d14;
+  --c-bg-2: #1b0033;
+  --c-neon-1: #01d8db;   /* azul cyan */
+  --c-neon-2: #e401cd;   /* magenta */
+  --c-neon-3: #6a00e2;   /* amarillo neón */
+  --c-text: #e6e6e6;
+  --c-muted: #999;
+  --border-radius: 8px;
+  --glow-size: 0 0 6px, 0 0 12px, 0 0 24px;
+  font-size: 14px;
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
 body {
   margin: 0;
-  font-family: Arial, sans-serif;
-  background: #202124;
-  color: #e8eaed;
-  width: 300px;
+  width: 320px;
+  height: 100%;
+  font-family: "Orbitron", sans-serif;
+  background: radial-gradient(circle at 20% 20%, var(--c-bg-2), var(--c-bg-1) 60%);
+  color: var(--c-text);
+  text-shadow: 0 0 2px #000;
+  overflow: hidden;
+  padding-bottom: .5rem;
 }
 
+/* ---------- Header pestañas ---------- */
 .tab-header {
   display: flex;
-  background: #2e2e2e;
+  backdrop-filter: blur(6px);
+  background: rgba(255,255,255,0.05);
+  border-bottom: 1px solid #ffffff22;
 }
 
+/* Botón de pestaña */
 .tab-btn {
-  flex: 1;
-  padding: 10px;
-  background: transparent;
+  flex: 1 1 0;
+  padding: .7rem 0;
+  background: none;
   border: none;
-  color: #e8eaed;
+  color: var(--c-muted);
   cursor: pointer;
-  font-weight: bold;
+  font-weight: 700;
+  letter-spacing: .5px;
+  position: relative;
+  transition: color .25s ease;
+}
+
+.tab-btn::after {
+  /* Línea luminosa inferior */
+  content: "";
+  position: absolute;
+  left: 20%;
+  right: 20%;
+  bottom: 6px;
+  height: 2px;
+  background: transparent;
+  transition: background .3s ease, box-shadow .3s ease;
+}
+
+.tab-btn:hover, .tab-btn:focus {
+  color: var(--c-neon-3);
 }
 
 .tab-btn.active {
-  background: #1a73e8;
+  color: var(--c-neon-1);
 }
 
+.tab-btn.active::after {
+  background: var(--c-neon-1);
+  box-shadow: var(--glow-size) var(--c-neon-1);
+}
+
+/* ---------- Contenido ---------- */
 .tab-content {
-  padding: 10px;
+  padding: 1rem .75rem 0 .75rem;
+  animation: fadeIn .35s ease both;
+  height: 200px;               /* asegura altura fija para evitar saltos */
 }
 
-.hidden {
-  display: none;
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
+.hidden { display: none !important; }
+
+/* ---------- Canvas ---------- */
+canvas {
+  background: #ffffff07;
+  border-radius: var(--border-radius);
+  backdrop-filter: blur(2px);
+  box-shadow: inset 0 0 8px #000000aa;
+}
+
+/* ---------- Scroll-detalle ---------- */
 .scroll-container {
-  max-height: 200px;
+  max-height: 186px;
   overflow-y: auto;
+  padding-right: 4px;       /* deja lugar a la barra */
 }
 
+/* Estilo de scrollbar (Blink-Webkit) */
+.scroll-container::-webkit-scrollbar {
+  width: 6px;
+}
+.scroll-container::-webkit-scrollbar-track {
+  background: #ffffff11;
+}
+.scroll-container::-webkit-scrollbar-thumb {
+  background: var(--c-neon-2);
+  border-radius: 3px;
+  box-shadow: var(--glow-size) var(--c-neon-2);
+}
+
+/* ---------- Botón Exportar ---------- */
 .export-button {
   width: 100%;
-  padding: 12px;
-  background: #1a73e8;
-  color: white;
+  padding: .9rem 0;
+  margin-top: 0.5rem;
+  font-weight: 700;
+  letter-spacing: .8px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--border-radius);
+  background: linear-gradient(135deg, var(--c-neon-2) 0%, #6f0075 60%);
+  color: #fff;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: transform .2s ease;
+  box-shadow: var(--glow-size) var(--c-neon-2);
 }
+
 .export-button:hover {
-  background: #185abc;
+  transform: translateY(-2px) scale(1.02);
+}
+
+.export-button::before {
+  /* Brillo que barre de izquierda a derecha */
+  content: "";
+  position: absolute;
+  top: 0; left: -75%;
+  width: 50%; height: 100%;
+  background: rgba(255,255,255,.25);
+  transform: skewX(-25deg);
+  animation: shine 2.5s infinite;
+}
+
+@keyframes shine {
+  0%  { left: -75%; }
+  60% { left: 125%; }
+  100%{ left: 125%; }
 }
