@@ -1,10 +1,10 @@
 // background.js
 
 // --- Estado persistido ---
-let segments        = [];            // Array de { domain, horaInicio, horaFin }
-let currentDomain   = null;          // dominio en curso
-let startTime       = null;          // Date de inicio del segmento actual
-let exported        = false;         // bandera de exportación
+let segments        = [];    // Array de { domain, horaInicio, horaFin }
+let currentDomain   = null;  // dominio en curso
+let startTime       = null;  // Date de inicio del segmento actual
+let exported        = false; // bandera de exportación
 
 // --- Persistencia en chrome.storage ---
 function persistState() {
@@ -25,125 +25,115 @@ function getDomain(url) {
   }
 }
 
-// --- Cambio de dominio / cierre de segmento anterior ---
+// --- switchDomain / captura de tab activo ---
 function switchDomain(newDomain) {
   const now = new Date();
-  // cerramos segmento anterior
   if (currentDomain && startTime) {
     segments.push({
-      domain:    currentDomain,
+      domain:     currentDomain,
       horaInicio: startTime.toISOString(),
       horaFin:    now.toISOString()
     });
   }
-  // arrancamos uno nuevo
   currentDomain = newDomain;
   startTime     = now;
   persistState();
 }
 
-// --- Captura el tab activo, ignorando “newtab” ---
 function captureActiveTab() {
   chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
     const url = tabs[0]?.url;
     if (!url) return;
     const dom = getDomain(url);
-    // newtab o unknown se absorbe en siguiente dominio válido
     if (dom === "newtab" || dom === "unknown") return;
-    // si cambió de dominio, switcheamos
-    if (dom !== currentDomain) {
-      switchDomain(dom);
-    }
+    if (dom !== currentDomain) switchDomain(dom);
   });
 }
 
-// --- Limpieza de segmentos: fusiona y absorbe interrupciones <10s ---
+// --- Limpieza de segmentos (fusiones + interrupciones <10s) ---
 function cleanLog(log) {
-  // 1) fusiona consecutivos idénticos
   const merged = [];
   for (const e of log) {
     const last = merged.at(-1);
-    if (last?.domain === e.domain) {
-      last.horaFin = e.horaFin;
-    } else {
-      merged.push({ ...e });
-    }
+    if (last?.domain === e.domain) last.horaFin = e.horaFin;
+    else merged.push({ ...e });
   }
-  // 2) absorbe interrupciones cortas (<10s) entre dos iguales
   const filtered = [];
   for (let i = 0; i < merged.length; i++) {
-    const curr = merged[i];
-    const prev = filtered.at(-1);
-    const next = merged[i+1];
-    const dur  = (new Date(curr.horaFin) - new Date(curr.horaInicio)) / 1000;
-    if (
-      dur < 10 &&
-      prev && next &&
-      prev.domain === next.domain &&
-      curr.domain !== prev.domain
-    ) {
+    const curr = merged[i], prev = filtered.at(-1), next = merged[i+1];
+    const dur = (new Date(curr.horaFin) - new Date(curr.horaInicio)) / 1000;
+    if (dur < 10 && prev && next && prev.domain === next.domain && curr.domain !== prev.domain) {
       prev.horaFin = curr.horaFin;
       continue;
     }
     filtered.push(curr);
   }
-  // 3) vuelve a fusionar posibles adyacentes iguales
   const final = [];
   for (const e of filtered) {
     const last = final.at(-1);
-    if (last?.domain === e.domain) {
-      last.horaFin = e.horaFin;
-    } else {
-      final.push({ ...e });
-    }
+    if (last?.domain === e.domain) last.horaFin = e.horaFin;
+    else final.push({ ...e });
   }
   return final;
 }
 
-// --- Generación de CSV según segmentos limpios ---
+// Convierte un ISO string en un timestamp local en formato YYYY-MM-DDTHH:mm:ss
+function formatLocalISOString(isoStr) {
+  const d = new Date(isoStr);
+  const pad = n => String(n).padStart(2, '0');
+  const YYYY = d.getFullYear();
+  const MM   = pad(d.getMonth() + 1);
+  const DD   = pad(d.getDate());
+  const hh   = pad(d.getHours());
+  const mm   = pad(d.getMinutes());
+  const ss   = pad(d.getSeconds());
+  return `${YYYY}-${MM}-${DD}T${hh}:${mm}:${ss}`;
+}
+
 function generateCSV(log) {
-  const header =
-    "USUARIO,ID_AREA,TAREA,CODIGO SIGD,FECH_INI,FECH_FIN,OBSERVACIONES,ID_CAT,CATEGORIA,SUBCATEGORIA\r\n";
-  const rows = log.map(e => [
-    "usuario@bancoguayaquil.com",
-    "ArqDatos",
-    e.domain,
-    "",
-    e.horaInicio,
-    e.horaFin,
-    "sin observaciones",
-    "TOTE",
-    "Tareas_Operativas",
-    "Tareas Eventuales"
-  ].join(","));
-  return header + rows.join("\r\n") + "\r\n";
+  const hdr = "USUARIO,ID_AREA,TAREA,CODIGO SIGD,FECH_INI,FECH_FIN,OBSERVACIONES,ID_CAT,CATEGORIA,SUBCATEGORIA\r\n";
+  const rows = log.map(e => {
+    // formateamos en local tz en vez de e.horaInicio (ISO UTC)
+    const ini = formatLocalISOString(e.horaInicio);
+    const fin = formatLocalISOString(e.horaFin);
+    return [
+      "usuario@bancoguayaquil.com",
+      "ArqDatos",
+      e.domain,
+      "",
+      ini,
+      fin,
+      "sin observaciones",
+      "TOTE",
+      "Tareas_Operativas",
+      "Tareas Eventuales"
+    ].join(",");
+  });
+  return hdr + rows.join("\r\n") + "\r\n";
 }
 
-// --- Descarga de Blob como CSV ---
 function downloadBlob(blob, filename, saveAs) {
-  const reader = new FileReader();
-  reader.onload = () => {
-    chrome.downloads.download({ url: reader.result, filename, saveAs });
-  };
-  reader.readAsDataURL(blob);
+  const r = new FileReader();
+  r.onload = () => chrome.downloads.download({ url: r.result, filename, saveAs });
+  r.readAsDataURL(blob);
 }
 
-// --- Handler de mensajes del popup ---
+// --- onMessage: get_activity_data y export_csv ---
 function onMessage(msg, _, sendResponse) {
   if (msg === "get_activity_data") {
-    // 1) construimos un array temporal que incluya el segmento vivo
+    // 1) incluimos el segmento vivo
     const all = segments.slice();
     if (currentDomain && startTime) {
       all.push({
-        domain:    currentDomain,
+        domain:     currentDomain,
         horaInicio: startTime.toISOString(),
         horaFin:    new Date().toISOString()
       });
     }
     // 2) limpiamos
     const cleaned = cleanLog(all);
-    // 3) resumimos por dominio
-    const map = {};
+    // 3) resumimos
+    const map = Object.create(null);
     cleaned.forEach(e => {
       map[e.domain] = map[e.domain] || { domain: e.domain, sessions: 0, duration: 0 };
       map[e.domain].sessions++;
@@ -154,46 +144,43 @@ function onMessage(msg, _, sendResponse) {
   }
 
   if (msg === "export_csv") {
-    // cerramos el tramo vivo
+    // cerramos el vivo
     if (currentDomain && startTime) {
       segments.push({
-        domain:    currentDomain,
+        domain:     currentDomain,
         horaInicio: startTime.toISOString(),
         horaFin:    new Date().toISOString()
       });
     }
-    // limpiamos + CSV
     const cleaned = cleanLog(segments);
     const csv     = generateCSV(cleaned);
     downloadBlob(new Blob([csv], { type: "text/csv" }), "reporte_web_bg.csv", true);
 
-    // posteo a httpbin para test
+    // test post
     fetch("https://httpbin.org/post", {
       method:  "POST",
       headers: { "Content-Type": "text/csv" },
       body:     csv
-    })
-    .then(r => r.json())
-    .then(x => console.log("httpbin echo:", x.data))
-    .catch(e => console.error(e));
+    }).catch(console.error);
 
-    // reinicio total
+    // reinicio YA y vuelvo a arrancar el contador
     segments      = [];
     currentDomain = null;
     startTime     = null;
-    exported      = true;
+    exported      = false;
     persistState();
+    captureActiveTab();
 
     sendResponse("done");
   }
 }
 
-// --- onSuspend: exporta automáticamente (sin saveAs) ---
+// --- onSuspend: export / post sin “saveAs” ---
 function onSuspend() {
   if (!exported) {
     if (currentDomain && startTime) {
       segments.push({
-        domain:    currentDomain,
+        domain:     currentDomain,
         horaInicio: startTime.toISOString(),
         horaFin:    new Date().toISOString()
       });
@@ -201,34 +188,34 @@ function onSuspend() {
     const cleaned = cleanLog(segments);
     const csv     = generateCSV(cleaned);
     downloadBlob(new Blob([csv], { type: "text/csv" }), "reporte_web_bg.csv", false);
-
-    // opcional: también lo posteamos
     fetch("https://httpbin.org/post", {
       method:  "POST",
       headers: { "Content-Type": "text/csv" },
       body:     csv
-    }).catch(() => {});
+    }).catch(()=>{});
   }
 }
 
-// --- Inicialización tras recuperar estado ---
+// --- Registra **inmediatamente** los listeners (antes de storage.get) ---
+chrome.runtime.onMessage.addListener(onMessage);
+chrome.runtime.onSuspend.addListener(onSuspend);
+chrome.tabs.onActivated.addListener(captureActiveTab);
+chrome.tabs.onUpdated.addListener((_,info,tab) => {
+  if (info.url && tab.active) captureActiveTab();
+});
+
+// --- Por último: restaurar estado y arrancar tracking ---
 chrome.storage.local.get(
   ["segments","currentDomain","startTime","exported"],
   data => {
-    segments      = Array.isArray(data.segments)      ? data.segments    : [];
+    segments      = Array.isArray(data.segments)    ? data.segments    : [];
     currentDomain = data.currentDomain || null;
-    startTime     = data.startTime ? new Date(data.startTime) : null;
-    exported      = data.exported      || false;
+    startTime     = data.startTime
+                     ? new Date(data.startTime)
+                     : null;
+    exported      = data.exported || false;
 
-    // registramos listeners
-    chrome.tabs.onActivated.addListener(captureActiveTab);
-    chrome.tabs.onUpdated.addListener((_,info,tab) => {
-      if (info.url && tab.active) captureActiveTab();
-    });
-    chrome.runtime.onMessage.addListener(onMessage);
-    chrome.runtime.onSuspend.addListener(onSuspend);
-
-    // primera captura
+    // arrancamos el primer segmento
     captureActiveTab();
   }
 );
