@@ -1,9 +1,12 @@
 // popup_tabs.js
 
+let donutChart, // guardamos la instancia para actualizarla
+    pollInterval;
+
 document.addEventListener("DOMContentLoaded", () => {
   console.log("📊 Popup cargado");
 
-  // Manejo de pestañas
+  // pestañas
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
@@ -13,20 +16,14 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // Petición de datos al background
-  chrome.runtime.sendMessage("get_activity_data", data => {
-    console.log("🔥 Datos recibidos en popup:", data);
-    if (!data || !Array.isArray(data.summary)) return;
+  // arrancamos el polling cada segundo
+  fetchAndRender();
+  pollInterval = setInterval(fetchAndRender, 1000);
 
-    const labels = data.summary.map(x => x.domain);
-    const durations = data.summary.map(x => x.duration);
-    const sessions = data.summary.map(x => x.sessions);
+  // al cerrar el popup, limpiamos el interval
+  window.addEventListener("unload", () => clearInterval(pollInterval) );
 
-    renderDonut(labels, durations);
-    renderBar(labels, sessions, durations);
-  });
-
-  // Botón Exportar
+  // exportar CSV
   const exportBtn = document.getElementById("exportBtn");
   if (exportBtn) {
     exportBtn.addEventListener("click", () => {
@@ -38,43 +35,59 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 });
 
-function renderDonut(labels, data) {
-  new Chart(document.getElementById("donutChart"), {
-    type: "doughnut",
-    data: {
-      labels,
-      datasets: [{
-        data,
-        backgroundColor: ["#00f9ff", "#ff00e6", "#fbff00", "#8c00ff", "#00ff8c"],
-        borderWidth: 0
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: "#e6e6e6" } } }
+function fetchAndRender() {
+  chrome.runtime.sendMessage("get_activity_data", data => {
+    if (!data || !Array.isArray(data.summary)) return;
+    console.log("🔄 Datos refrescados:", data.summary);
+
+    const labels   = data.summary.map(x => x.domain);
+    const sessions = data.summary.map(x => x.sessions);
+    const durations= data.summary.map(x => x.duration);
+
+    // donut
+    if (!donutChart) {
+      // primera vez, creamos el chart
+      donutChart = new Chart(document.getElementById("donutChart"), {
+        type: "doughnut",
+        data:      { labels, datasets: [{ data: durations }] },
+        options:   { responsive: true, maintainAspectRatio: false }
+      });
+    } else {
+      // simplemente actualizamos sus datos
+      donutChart.data.labels    = labels;
+      donutChart.data.datasets[0].data = durations;
+      donutChart.update();
     }
+
+    // lista de tiempos
+    renderTimeList(data.summary);
   });
 }
 
-function renderBar(labels, sessions, durations) {
-  new Chart(document.getElementById("barChart"), {
-    type: "bar",
-    data: {
-      labels,
-      datasets: [
-        { label: "Sesiones", data: sessions, backgroundColor: "#00f9ff" },
-        { label: "Tiempo (s)", data: durations, backgroundColor: "#ff00e6" }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        x: { ticks: { color: "#e6e6e6" }, grid: { color: "#ffffff22" } },
-        y: { beginAtZero: true, ticks: { color: "#e6e6e6" }, grid: { color: "#ffffff22" } }
-      },
-      plugins: { legend: { labels: { color: "#e6e6e6" } } }
-    }
+function renderTimeList(summary) {
+  const ul = document.getElementById("timeList");
+  ul.innerHTML = "";
+  summary.forEach(item => {
+    const li = document.createElement("li");
+    li.className = "time-item";
+
+    const domainSpan = document.createElement("span");
+    domainSpan.textContent = item.domain;
+
+    const timeSpan = document.createElement("span");
+    timeSpan.textContent = formatDuration(item.duration);
+
+    li.appendChild(domainSpan);
+    li.appendChild(timeSpan);
+    ul.appendChild(li);
   });
+}
+
+// Convierte segundos en HH:MM:SS
+function formatDuration(totalSeconds) {
+  const sec = Math.floor(totalSeconds % 60);
+  const min = Math.floor((totalSeconds / 60) % 60);
+  const hr  = Math.floor(totalSeconds / 3600);
+  const pad = n => String(n).padStart(2, "0");
+  return `${pad(hr)}:${pad(min)}:${pad(sec)}`;
 }

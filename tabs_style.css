@@ -158,3 +158,18 @@ canvas {
   60% { left: 125%; }
   100%{ left: 125%; }
 }
+
+.time-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.time-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #444;
+  color: #e8eaed;
+  font-size: 14px;
+}

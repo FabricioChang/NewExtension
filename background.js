@@ -1,10 +1,20 @@
 // background.js
 
-let activityLog = [];
-let currentActivity = null;
-let exported = false;
+// ---- Estado persistido ----
+let usage = {};             // { dominio: totalSegundosAcumulados }
+let currentDomain = null;   // dominio activo
+let startTime = null;       // Date ISO string o timestamp
 
-// --- Helpers de dominio y tarea ---
+// --- Persiste en chrome.storage.local ---
+function persistState() {
+  chrome.storage.local.set({
+    usage,
+    currentDomain,
+    startTime: startTime ? startTime.toISOString() : null
+  });
+}
+
+// --- Helpers ---
 function getDomain(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -13,171 +23,148 @@ function getDomain(url) {
   }
 }
 
-function extractTaskName(domain) {
-  const m = domain.match(/(?:^|\.)?([^.]+)\.com(?:\..*)?$/);
-  return m ? m[1] : domain;
-}
-
-// Ahora acepta duraciones de 0 segundos
-function isValidActivity(a) {
-  return a.domain !== "unknown" &&
-         a.domain !== "newtab" &&
-         a.horaFin >= a.horaInicio;
-}
-
-// --- Lógica de tracking ---
-function startActivity(domain) {
+// Cuando cambia el dominio, acumula el tramo anterior y arranca uno nuevo
+function switchDomain(newDomain) {
   const now = new Date();
-
-  if (!currentActivity) {
-    currentActivity = { domain, horaInicio: now, horaFin: now };
-    return;
+  if (currentDomain && startTime) {
+    const elapsed = (now - new Date(startTime)) / 1000;
+    usage[currentDomain] = (usage[currentDomain] || 0) + elapsed;
   }
-  if (domain === currentActivity.domain) {
-    currentActivity.horaFin = now;
-    return;
-  }
-  if (isValidActivity(currentActivity)) {
-    activityLog.push({ ...currentActivity });
-  }
-  currentActivity = { domain, horaInicio: now, horaFin: now };
+  currentDomain = newDomain;
+  startTime = new Date();
+  persistState();
 }
 
+// Captura el dominio de la pestaña activa
 function captureActiveTab() {
   chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-    if (tabs[0] && tabs[0].url) {
-      startActivity(getDomain(tabs[0].url));
+    if (tabs[0]?.url) {
+      const dom = getDomain(tabs[0].url);
+      if (dom !== currentDomain) switchDomain(dom);
     }
   });
 }
 
-function finishCurrentActivity() {
-  if (currentActivity && isValidActivity(currentActivity)) {
-    currentActivity.horaFin = new Date();
-    activityLog.push({ ...currentActivity });
+// Devuelve un map con el uso final, sumando el tramo en curso
+function getFinalUsage() {
+  const now = new Date();
+  const result = { ...usage };
+  if (currentDomain && startTime) {
+    const elapsed = (now - new Date(startTime)) / 1000;
+    result[currentDomain] = (result[currentDomain]||0) + elapsed;
   }
-  currentActivity = null;
+  return result;
 }
 
-// --- Limpieza y generación de CSV ---
-function cleanLog(log) {
-  // 1) Fusiona consecutivos idénticos
-  const merged = [];
-  for (const e of log) {
-    const last = merged[merged.length - 1];
-    if (last && last.domain === e.domain) {
-      last.horaFin = e.horaFin;
-    } else {
-      merged.push({ ...e });
-    }
-  }
-  // 2) Elimina interrupciones <10s entre el mismo dominio
-  const filtered = [];
-  for (let i = 0; i < merged.length; i++) {
-    const curr = merged[i];
-    const prev = filtered[filtered.length - 1];
-    const next = merged[i + 1];
-    const dur = (new Date(curr.horaFin) - new Date(curr.horaInicio)) / 1000;
-    if (
-      dur < 10 &&
-      prev && next &&
-      prev.domain === next.domain &&
-      curr.domain !== prev.domain
-    ) {
-      prev.horaFin = curr.horaFin;
-      continue;
-    }
-    filtered.push(curr);
-  }
-  // 3) Fusiona otra vez tras filtrar
-  const final = [];
-  for (const e of filtered) {
-    const last = final[final.length - 1];
-    if (last && last.domain === e.domain) {
-      last.horaFin = e.horaFin;
-    } else {
-      final.push({ ...e });
-    }
-  }
-  return final;
-}
-
-function generateCSV(log) {
+// --- Generación de CSV ---
+function generateCSVFromUsage(map) {
   const header =
     "USUARIO,ID_AREA,TAREA,CODIGO SIGD,FECH_INI,FECH_FIN,OBSERVACIONES,ID_CAT,CATEGORIA,SUBCATEGORIA\r\n";
-  const rows = log.map(e => [
-    "usuario@bancoguayaquil.com",
-    "ArqDatos",
-    extractTaskName(e.domain),
-    "",
-    e.horaInicio.toISOString(),
-    e.horaFin.toISOString(),
-    "sin observaciones",
-    "TOTE",
-    "Tareas_Operativas",
-    "Tareas Eventuales"
-  ].join(","));
+  const rows = [];
+  const now = new Date();
+  // Para cada dominio, necesitamos reconstruir start/end aproximados:
+  // asumimos que todo el tiempo pudo repartirse uniformemente:
+  // FECH_INI = ahora - total; FECH_FIN = ahora
+  for (const [dom, secs] of Object.entries(map)) {
+    const end = now.toISOString();
+    const start = new Date(now - secs*1000).toISOString();
+    rows.push([
+      "usuario@bancoguayaquil.com",
+      "ArqDatos",
+      dom,
+      "",
+      start,
+      end,
+      "sin observaciones",
+      "TOTE",
+      "Tareas_Operativas",
+      "Tareas Eventuales"
+    ].join(","));
+  }
   return header + rows.join("\r\n") + "\r\n";
 }
 
+// --- Descarga Blob helper ---
 function downloadBlob(blob, filename, saveAs) {
   const reader = new FileReader();
-  reader.onload = () => {
-    chrome.downloads.download({ url: reader.result, filename, saveAs });
-  };
+  reader.onload = () => chrome.downloads.download({
+    url: reader.result,
+    filename,
+    saveAs
+  });
   reader.readAsDataURL(blob);
 }
 
-// --- Listeners ---
-chrome.tabs.onActivated.addListener(captureActiveTab);
-chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
-  if (info.url && tab.active) captureActiveTab();
-});
-
+// --- Mensajes desde el popup ---
 chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
-  if (msg === "export_csv") {
-    finishCurrentActivity();
-    const cleaned = cleanLog(activityLog);
-    const csv = generateCSV(cleaned);
-    downloadBlob(new Blob([csv], { type: "text/csv" }), "reporte_web_bg.csv", true);
-    exported = true;
-    activityLog = [];
-    currentActivity = null;
-    sendResponse("done");
-  }
-  else if (msg === "get_activity_data") {
-    // Incluye siempre la actividad en curso actualizada
-    const tempLog = activityLog.slice();
-    if (currentActivity) {
-      currentActivity.horaFin = new Date();
-      tempLog.push({ ...currentActivity });
-    }
-    const cleaned = cleanLog(tempLog);
-
-    const map = Object.create(null);
-    cleaned.forEach(e => {
-      const key = extractTaskName(e.domain);
-      if (!map[key]) map[key] = { domain: key, sessions: 0, duration: 0 };
-      map[key].sessions++;
-      map[key].duration += (new Date(e.horaFin) - new Date(e.horaInicio)) / 1000;
-    });
-
-    sendResponse({ summary: Object.values(map), detail: cleaned });
+  if (msg === "get_activity_data") {
+    // prepara resumen para gráfico
+    const finalUsage = getFinalUsage();
+    const summary = Object.entries(finalUsage).map(([dom, secs]) => ({
+      domain: dom,
+      sessions: 1,         // seguimos contando tramos como “1 sesión” cada uno
+      duration: secs
+    }));
+    sendResponse({ summary, detail: [] });
     return true;
   }
-});
 
-chrome.runtime.onSuspend.addListener(() => {
-  if (!exported) {
-    finishCurrentActivity();
-    const cleaned = cleanLog(activityLog);
-    const csv = generateCSV(cleaned);
-    downloadBlob(new Blob([csv], { type: "text/csv" }), "reporte_web_bg.csv", false);
+  if (msg === "export_csv") {
+    // acumula el tramo en curso
+    switchDomain(currentDomain);
+
+    // genera CSV y descarga
+    const finalUsage = getFinalUsage();
+    const csv = generateCSVFromUsage(finalUsage);
+    downloadBlob(new Blob([csv], { type: "text/csv" }), "reporte_web_bg.csv", true);
+
+    // envía al endpoint de prueba
+    fetch("https://httpbin.org/post", {
+      method: "POST",
+      headers: { "Content-Type": "text/csv" },
+      body: csv
+    })
+    .then(r => r.json())
+    .then(d => console.log("Echo httpbin:", d.data))
+    .catch(e => console.error(e));
+
+    // reinicia estado
+    usage = {};
+    currentDomain = null;
+    startTime = null;
     exported = true;
-    activityLog = [];
-    currentActivity = null;
+    persistState();
+
+    sendResponse("done");
   }
 });
 
-// Primera captura en cuanto arranca el background
-captureActiveTab();
+// --- onSuspend (ej. cierre navegador) ---
+chrome.runtime.onSuspend.addListener(() => {
+  // igual que exportar pero sin saveAs y sin reiniciar
+  switchDomain(currentDomain);
+  const finalUsage = getFinalUsage();
+  const csv = generateCSVFromUsage(finalUsage);
+  downloadBlob(new Blob([csv], { type: "text/csv" }), "reporte_web_bg.csv", false);
+  fetch("https://httpbin.org/post", { method:"POST", headers:{"Content-Type":"text/csv"}, body:csv })
+    .catch(()=>{});
+});
+
+// --- Inicialización: recupera estado y arranca listeners ---
+chrome.storage.local.get(
+  ["usage","currentDomain","startTime","exported"],
+  data => {
+    usage         = data.usage         || {};
+    currentDomain = data.currentDomain || null;
+    startTime     = data.startTime     ? new Date(data.startTime) : null;
+    exported      = data.exported      || false;
+
+    chrome.tabs.onActivated.addListener(captureActiveTab);
+    chrome.tabs.onUpdated.addListener((_,info,tab) => {
+      if (info.url && tab.active) captureActiveTab();
+    });
+
+    // primera captura
+    captureActiveTab();
+  }
+);
