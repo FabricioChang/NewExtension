@@ -1,20 +1,22 @@
 // background.js
 
-// ---- Estado persistido ----
-let usage = {};             // { dominio: totalSegundosAcumulados }
-let currentDomain = null;   // dominio activo
-let startTime = null;       // Date ISO string o timestamp
+// --- Estado persistido ---
+let segments        = [];            // Array de { domain, horaInicio, horaFin }
+let currentDomain   = null;          // dominio en curso
+let startTime       = null;          // Date de inicio del segmento actual
+let exported        = false;         // bandera de exportación
 
-// --- Persiste en chrome.storage.local ---
+// --- Persistencia en chrome.storage ---
 function persistState() {
   chrome.storage.local.set({
-    usage,
+    segments,
     currentDomain,
-    startTime: startTime ? startTime.toISOString() : null
+    startTime: startTime?.toISOString() || null,
+    exported
   });
 }
 
-// --- Helpers ---
+// --- Helpers de dominio ---
 function getDomain(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -23,146 +25,208 @@ function getDomain(url) {
   }
 }
 
-// Cuando cambia el dominio, acumula el tramo anterior y arranca uno nuevo
+// --- Cambio de dominio / cierre de segmento anterior ---
 function switchDomain(newDomain) {
   const now = new Date();
+  // cerramos segmento anterior
   if (currentDomain && startTime) {
-    const elapsed = (now - new Date(startTime)) / 1000;
-    usage[currentDomain] = (usage[currentDomain] || 0) + elapsed;
+    segments.push({
+      domain:    currentDomain,
+      horaInicio: startTime.toISOString(),
+      horaFin:    now.toISOString()
+    });
   }
+  // arrancamos uno nuevo
   currentDomain = newDomain;
-  startTime = new Date();
+  startTime     = now;
   persistState();
 }
 
-// Captura el dominio de la pestaña activa
+// --- Captura el tab activo, ignorando “newtab” ---
 function captureActiveTab() {
   chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
-    if (tabs[0]?.url) {
-      const dom = getDomain(tabs[0].url);
-      if (dom !== currentDomain) switchDomain(dom);
+    const url = tabs[0]?.url;
+    if (!url) return;
+    const dom = getDomain(url);
+    // newtab o unknown se absorbe en siguiente dominio válido
+    if (dom === "newtab" || dom === "unknown") return;
+    // si cambió de dominio, switcheamos
+    if (dom !== currentDomain) {
+      switchDomain(dom);
     }
   });
 }
 
-// Devuelve un map con el uso final, sumando el tramo en curso
-function getFinalUsage() {
-  const now = new Date();
-  const result = { ...usage };
-  if (currentDomain && startTime) {
-    const elapsed = (now - new Date(startTime)) / 1000;
-    result[currentDomain] = (result[currentDomain]||0) + elapsed;
+// --- Limpieza de segmentos: fusiona y absorbe interrupciones <10s ---
+function cleanLog(log) {
+  // 1) fusiona consecutivos idénticos
+  const merged = [];
+  for (const e of log) {
+    const last = merged.at(-1);
+    if (last?.domain === e.domain) {
+      last.horaFin = e.horaFin;
+    } else {
+      merged.push({ ...e });
+    }
   }
-  return result;
+  // 2) absorbe interrupciones cortas (<10s) entre dos iguales
+  const filtered = [];
+  for (let i = 0; i < merged.length; i++) {
+    const curr = merged[i];
+    const prev = filtered.at(-1);
+    const next = merged[i+1];
+    const dur  = (new Date(curr.horaFin) - new Date(curr.horaInicio)) / 1000;
+    if (
+      dur < 10 &&
+      prev && next &&
+      prev.domain === next.domain &&
+      curr.domain !== prev.domain
+    ) {
+      prev.horaFin = curr.horaFin;
+      continue;
+    }
+    filtered.push(curr);
+  }
+  // 3) vuelve a fusionar posibles adyacentes iguales
+  const final = [];
+  for (const e of filtered) {
+    const last = final.at(-1);
+    if (last?.domain === e.domain) {
+      last.horaFin = e.horaFin;
+    } else {
+      final.push({ ...e });
+    }
+  }
+  return final;
 }
 
-// --- Generación de CSV ---
-function generateCSVFromUsage(map) {
+// --- Generación de CSV según segmentos limpios ---
+function generateCSV(log) {
   const header =
     "USUARIO,ID_AREA,TAREA,CODIGO SIGD,FECH_INI,FECH_FIN,OBSERVACIONES,ID_CAT,CATEGORIA,SUBCATEGORIA\r\n";
-  const rows = [];
-  const now = new Date();
-  // Para cada dominio, necesitamos reconstruir start/end aproximados:
-  // asumimos que todo el tiempo pudo repartirse uniformemente:
-  // FECH_INI = ahora - total; FECH_FIN = ahora
-  for (const [dom, secs] of Object.entries(map)) {
-    const end = now.toISOString();
-    const start = new Date(now - secs*1000).toISOString();
-    rows.push([
-      "usuario@bancoguayaquil.com",
-      "ArqDatos",
-      dom,
-      "",
-      start,
-      end,
-      "sin observaciones",
-      "TOTE",
-      "Tareas_Operativas",
-      "Tareas Eventuales"
-    ].join(","));
-  }
+  const rows = log.map(e => [
+    "usuario@bancoguayaquil.com",
+    "ArqDatos",
+    e.domain,
+    "",
+    e.horaInicio,
+    e.horaFin,
+    "sin observaciones",
+    "TOTE",
+    "Tareas_Operativas",
+    "Tareas Eventuales"
+  ].join(","));
   return header + rows.join("\r\n") + "\r\n";
 }
 
-// --- Descarga Blob helper ---
+// --- Descarga de Blob como CSV ---
 function downloadBlob(blob, filename, saveAs) {
   const reader = new FileReader();
-  reader.onload = () => chrome.downloads.download({
-    url: reader.result,
-    filename,
-    saveAs
-  });
+  reader.onload = () => {
+    chrome.downloads.download({ url: reader.result, filename, saveAs });
+  };
   reader.readAsDataURL(blob);
 }
 
-// --- Mensajes desde el popup ---
-chrome.runtime.onMessage.addListener((msg, _, sendResponse) => {
+// --- Handler de mensajes del popup ---
+function onMessage(msg, _, sendResponse) {
   if (msg === "get_activity_data") {
-    // prepara resumen para gráfico
-    const finalUsage = getFinalUsage();
-    const summary = Object.entries(finalUsage).map(([dom, secs]) => ({
-      domain: dom,
-      sessions: 1,         // seguimos contando tramos como “1 sesión” cada uno
-      duration: secs
-    }));
-    sendResponse({ summary, detail: [] });
+    // 1) construimos un array temporal que incluya el segmento vivo
+    const all = segments.slice();
+    if (currentDomain && startTime) {
+      all.push({
+        domain:    currentDomain,
+        horaInicio: startTime.toISOString(),
+        horaFin:    new Date().toISOString()
+      });
+    }
+    // 2) limpiamos
+    const cleaned = cleanLog(all);
+    // 3) resumimos por dominio
+    const map = {};
+    cleaned.forEach(e => {
+      map[e.domain] = map[e.domain] || { domain: e.domain, sessions: 0, duration: 0 };
+      map[e.domain].sessions++;
+      map[e.domain].duration += (new Date(e.horaFin) - new Date(e.horaInicio)) / 1000;
+    });
+    sendResponse({ summary: Object.values(map), detail: cleaned });
     return true;
   }
 
   if (msg === "export_csv") {
-    // acumula el tramo en curso
-    switchDomain(currentDomain);
-
-    // genera CSV y descarga
-    const finalUsage = getFinalUsage();
-    const csv = generateCSVFromUsage(finalUsage);
+    // cerramos el tramo vivo
+    if (currentDomain && startTime) {
+      segments.push({
+        domain:    currentDomain,
+        horaInicio: startTime.toISOString(),
+        horaFin:    new Date().toISOString()
+      });
+    }
+    // limpiamos + CSV
+    const cleaned = cleanLog(segments);
+    const csv     = generateCSV(cleaned);
     downloadBlob(new Blob([csv], { type: "text/csv" }), "reporte_web_bg.csv", true);
 
-    // envía al endpoint de prueba
+    // posteo a httpbin para test
     fetch("https://httpbin.org/post", {
-      method: "POST",
+      method:  "POST",
       headers: { "Content-Type": "text/csv" },
-      body: csv
+      body:     csv
     })
     .then(r => r.json())
-    .then(d => console.log("Echo httpbin:", d.data))
+    .then(x => console.log("httpbin echo:", x.data))
     .catch(e => console.error(e));
 
-    // reinicia estado
-    usage = {};
+    // reinicio total
+    segments      = [];
     currentDomain = null;
-    startTime = null;
-    exported = true;
+    startTime     = null;
+    exported      = true;
     persistState();
 
     sendResponse("done");
   }
-});
+}
 
-// --- onSuspend (ej. cierre navegador) ---
-chrome.runtime.onSuspend.addListener(() => {
-  // igual que exportar pero sin saveAs y sin reiniciar
-  switchDomain(currentDomain);
-  const finalUsage = getFinalUsage();
-  const csv = generateCSVFromUsage(finalUsage);
-  downloadBlob(new Blob([csv], { type: "text/csv" }), "reporte_web_bg.csv", false);
-  fetch("https://httpbin.org/post", { method:"POST", headers:{"Content-Type":"text/csv"}, body:csv })
-    .catch(()=>{});
-});
+// --- onSuspend: exporta automáticamente (sin saveAs) ---
+function onSuspend() {
+  if (!exported) {
+    if (currentDomain && startTime) {
+      segments.push({
+        domain:    currentDomain,
+        horaInicio: startTime.toISOString(),
+        horaFin:    new Date().toISOString()
+      });
+    }
+    const cleaned = cleanLog(segments);
+    const csv     = generateCSV(cleaned);
+    downloadBlob(new Blob([csv], { type: "text/csv" }), "reporte_web_bg.csv", false);
 
-// --- Inicialización: recupera estado y arranca listeners ---
+    // opcional: también lo posteamos
+    fetch("https://httpbin.org/post", {
+      method:  "POST",
+      headers: { "Content-Type": "text/csv" },
+      body:     csv
+    }).catch(() => {});
+  }
+}
+
+// --- Inicialización tras recuperar estado ---
 chrome.storage.local.get(
-  ["usage","currentDomain","startTime","exported"],
+  ["segments","currentDomain","startTime","exported"],
   data => {
-    usage         = data.usage         || {};
+    segments      = Array.isArray(data.segments)      ? data.segments    : [];
     currentDomain = data.currentDomain || null;
-    startTime     = data.startTime     ? new Date(data.startTime) : null;
+    startTime     = data.startTime ? new Date(data.startTime) : null;
     exported      = data.exported      || false;
 
+    // registramos listeners
     chrome.tabs.onActivated.addListener(captureActiveTab);
     chrome.tabs.onUpdated.addListener((_,info,tab) => {
       if (info.url && tab.active) captureActiveTab();
     });
+    chrome.runtime.onMessage.addListener(onMessage);
+    chrome.runtime.onSuspend.addListener(onSuspend);
 
     // primera captura
     captureActiveTab();
