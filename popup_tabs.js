@@ -84,22 +84,42 @@ function fetchAndRender() {
 
 function renderTimeList(summary, colors) {
   const ul = document.getElementById("timeList");
-  ul.innerHTML = "";
+  ul.innerHTML = ""; // Limpia la lista antes de volver a renderizar
+
   summary.forEach((item, i) => {
     const li = document.createElement("li");
     li.className = "time-item";
 
-    const d = document.createElement("span");
-    d.textContent = item.domain;
-    d.style.color = colors[i];  // Aplica el color HSL al texto
+    /* ---------- ICONO ---------- */
+    const icon = document.createElement("img");
+    icon.className = "time-icon";
+    // Intenta obtener el favicon, si falla, usa uno genérico.
+   // icon.src = `https://icons.duckduckgo.com/ip3/${item.domain}.ico`;
+    icon.alt = "";
+icon.src = `https://icons.duckduckgo.com/ip3/${item.domain}.ico`;
+icon.onerror = () => {
+  icon.onerror = null;
+  icon.src = `chrome://favicon/size/16@2x/${item.domain}`;
+};
 
-    const t = document.createElement("span");
-    t.textContent = formatDuration(item.duration);
 
-    li.append(d, t);
+    /* ---------- NOMBRE + DURACIÓN ---------- */
+    const name = document.createElement("span");
+    name.className = "time-name";
+    name.textContent = item.domain;
+    name.style.color = colors[i]; // Asigna el color del gráfico
+
+    const dur = document.createElement("span");
+    dur.className = "time-duration";
+    dur.textContent = formatDuration(item.duration);
+
+    // Añade todos los elementos al <li>
+    li.append(icon, name, dur);
     ul.appendChild(li);
   });
 }
+
+
 
 function formatDuration(secTotal) {
   const s = Math.floor(secTotal % 60);

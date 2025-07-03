@@ -22,16 +22,17 @@
       "128": "icon.png"
     }
   },
-   "content_security_policy": {
-    "extension_pages": "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;"
-  },
+   
+  "content_security_policy": {"extension_pages": "default-src 'self'; style-src   'self' 'unsafe-inline' https://fonts.googleapis.com; font-src    'self' https://fonts.gstatic.com; img-src     'self' data: https://icon.horse https://icons.duckduckgo.com; connect-src 'self';"
+  }
+,
   "icons": {
     "16": "icon.png",
     "48": "icon.png",
     "128": "icon.png"
   },
   "web_accessible_resources": [{
-    "resources": ["tabs_style.css","popup_tabs.js","chart.min.js"],
+    "resources": ["tabs_style.css","popup_tabs.js","chart.min.js","icons/default16.png"],
     "matches": ["<all_urls>"]
   }]
 }
