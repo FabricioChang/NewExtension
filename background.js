@@ -100,10 +100,10 @@ function generateCSV(log) {
       "usuario@bancoguayaquil.com",
       "ArqDatos",
       e.domain,
-      "",
+      "N/A",
       ini,
       fin,
-      "sin observaciones",
+      "Sin observaciones",
       "TOTE",
       "Tareas_Operativas",
       "Tareas Eventuales"
