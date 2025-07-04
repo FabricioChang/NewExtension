@@ -13,25 +13,23 @@
 <body>
   <div class="tab-header">
     <button class="tab-btn active" data-tab="grafico">Gráfico</button>
-    <button class="tab-btn" data-tab="detalle">Detalle Subtareas</button>
-    <button class="tab-btn" data-tab="exportar">Exportar</button>
+    <button class="tab-btn"       data-tab="detalle">Detalle Subtareas</button>
+    <button class="tab-btn"       data-tab="exportar">Exportar</button>
   </div>
 
-  <!-- Tab 1: dona -->
   <div class="tab-content" id="grafico">
     <canvas id="donutChart" style="width:100%;height:200px;"></canvas>
   </div>
 
-  <!-- Tab 2: lista de tiempos -->
   <div class="tab-content hidden" id="detalle">
-  <div class="scroll-container">
-    <ul id="timeList" class="time-list"></ul>
+    <div class="scroll-container">
+      <ul id="timeList" class="time-list"></ul>
+    </div>
   </div>
-</div>
 
-  <!-- Tab 3: exportar -->
   <div class="tab-content hidden" id="exportar">
-    <button id="exportBtn" class="export-button">Exportar CSV</button>
+    <button id="exportBtn"     class="export-button">Exportar CSV</button>
+    <button id="changeUserBtn" class="export-button">Cambiar Usuario</button>
   </div>
 </body>
 </html>
